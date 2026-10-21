@@ -34,10 +34,21 @@ ERRORES=0
 for base in $BASES; do
 	final="$DESTINO/${base}_${FECHA}.sql.gz"
 	temporal="$final.tmp"
-	if "$DUMP_BIN" --single-transaction --routines --triggers --events "$base" | gzip > "$temporal" && gzip -t < "$temporal"; then
-		mv "$temporal" "$final"
-		(cd "$DESTINO" && sha256sum "$(basename "$final")" > "$(basename "$final").sha256")
-		echo "OK: $final"
+		if "$DUMP_BIN" --single-transaction --routines --triggers --events "$base" | gzip > "$temporal" \
+			&& gzip -t < "$temporal"; then
+		if mv "$temporal" "$final"; then
+			if (cd "$DESTINO" && sha256sum "$(basename "$final")" > "$(basename "$final").sha256"); then
+				echo "OK: $final"
+			else
+				rm -f "$final"
+				echo "ERROR: no se pudo generar el SHA-256 de '$base'." >&2
+				ERRORES=$((ERRORES + 1))
+			fi
+		else
+			rm -f "$temporal"
+			echo "ERROR: no se pudo publicar el respaldo de '$base'." >&2
+			ERRORES=$((ERRORES + 1))
+		fi
 	else
 		rm -f "$temporal"
 		echo "ERROR: fallo el respaldo de '$base'." >&2
