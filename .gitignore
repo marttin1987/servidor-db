@@ -1,0 +1,6 @@
+*.sql
+*.sql.gz
+*.sql.gz.sha256
+*.pass
+*.tmp
+.env
