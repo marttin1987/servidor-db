@@ -37,13 +37,18 @@ for base in $BASES; do
 		if "$DUMP_BIN" --single-transaction --routines --triggers --events "$base" | gzip > "$temporal" \
 			&& gzip -t < "$temporal"; then
 		if mv "$temporal" "$final"; then
-			if (cd "$DESTINO" && sha256sum "$(basename "$final")" > "$(basename "$final").sha256"); then
-				echo "OK: $final"
-			else
-				rm -f "$final"
-				echo "ERROR: no se pudo generar el SHA-256 de '$base'." >&2
-				ERRORES=$((ERRORES + 1))
-			fi
+		checksum="$final.sha256"
+		checksum_temporal="$checksum.tmp"
+
+		if (cd "$DESTINO" && sha256sum "$(basename "$final")" > "$(basename "$checksum_temporal")") \
+			&& mv "$checksum_temporal" "$checksum"; then
+			echo "OK: $final"
+		else
+			rm -f "$final" "$checksum_temporal" "$checksum"
+			echo "ERROR: no se pudo generar el SHA-256 de '$base'." >&2
+			ERRORES=$((ERRORES + 1))
+		fi
+
 		else
 			rm -f "$temporal"
 			echo "ERROR: no se pudo publicar el respaldo de '$base'." >&2
