@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-
-# Respalda bases de MariaDB con mariadb-dump: volcado comprimido, escritura
-# atomica, firma SHA-256 y rotacion por antiguedad.
+# Respalda bases de MariaDB: vuelca cada base a una carpeta de preparacion
+# y llama al motor de respaldo rotatorio, que comprime, firma con SHA-256
+# y rota las copias viejas.
 #
 # Entra a la base por el socket como root, sin guardar contrasenas.
 #
-# Codigos de salida: 0 = OK, 2 = error
+# Codigos de salida: 0 = OK, 2 = error (o el codigo del motor)
 # Uso: sudo ./scripts/respaldar-db.sh
 #
-# Variables opcionales: BASES, DESTINO, RETENCION_DIAS
+# Variables opcionales: BASES, MOTOR, CONFIG
 
 set -u
 set -o pipefail
@@ -16,54 +16,44 @@ export LC_ALL=C
 umask 077
 
 BASES="${BASES:-inventario}"
-DESTINO="${DESTINO:-/var/backups/db}"
-RETENCION_DIAS="${RETENCION_DIAS:-7}"
+MOTOR="${MOTOR:-/usr/local/sbin/respaldo-rotatorio.sh}"
+CONFIG="${CONFIG:-/etc/respaldos/db.conf}"
 DUMP_BIN="${DUMP_BIN:-mariadb-dump}"
 
 if [ "$(id -u)" -ne 0 ]; then
-	echo "ERROR: ejecutar con sudo." >&2
+    echo "ERROR: ejecutar con sudo." >&2
     exit 2
 fi
 
-mkdir -p "$DESTINO"
-chmod 700 "$DESTINO"
+if [ ! -x "$MOTOR" ] || [ ! -f "$CONFIG" ]; then
+    echo "ERROR: falta '$MOTOR' o '$CONFIG'." >&2
+    exit 2
+fi
 
-FECHA=$(date '+%Y-%m-%d_%H-%M-%S')
-ERRORES=0
+# La carpeta de preparacion es el origen que define la configuracion
+# shellcheck source=/dev/null
+. "$CONFIG"
+PREPARACION="${DIR_ORIGEN:?falta DIR_ORIGEN en la configuracion}"
+
+mkdir -p "$PREPARACION"
+chmod 700 "$PREPARACION"
+find "${PREPARACION:?}" -mindepth 1 -delete
 
 for base in $BASES; do
-	final="$DESTINO/${base}_${FECHA}.sql.gz"
-	temporal="$final.tmp"
-		if "$DUMP_BIN" --single-transaction --routines --triggers --events "$base" | gzip > "$temporal" \
-			&& gzip -t < "$temporal"; then
-		if mv "$temporal" "$final"; then
-		checksum="$final.sha256"
-		checksum_temporal="$checksum.tmp"
-
-		if (cd "$DESTINO" && sha256sum "$(basename "$final")" > "$(basename "$checksum_temporal")") \
-			&& mv "$checksum_temporal" "$checksum"; then
-			echo "OK: $final"
-		else
-			rm -f "$final" "$checksum_temporal" "$checksum"
-			echo "ERROR: no se pudo generar el SHA-256 de '$base'." >&2
-			ERRORES=$((ERRORES + 1))
-		fi
-
-		else
-			rm -f "$temporal"
-			echo "ERROR: no se pudo publicar el respaldo de '$base'." >&2
-			ERRORES=$((ERRORES + 1))
-		fi
-	else
-		rm -f "$temporal"
-		echo "ERROR: fallo el respaldo de '$base'." >&2
-		ERRORES=$((ERRORES + 1))
-	fi
+    destino="$PREPARACION/${base}.sql"
+    if "$DUMP_BIN" --single-transaction --routines --triggers --events "$base" > "$destino" \
+        && tail -n 1 "$destino" | grep -q '^-- Dump completed'; then
+        echo "OK: volcado de '$base'."
+    else
+        echo "ERROR: fallo el volcado de '$base'." >&2
+        find "${PREPARACION:?}" -mindepth 1 -delete
+        exit 2
+    fi
 done
 
-if [ "$ERRORES" -gt 0 ]; then
-    echo "ERROR: $ERRORES base(s) fallaron; no se rota para conservar las copias anteriores." >&2
-    exit 2
-fi
+"$MOTOR" "$CONFIG"
+codigo=$?
 
-find "$DESTINO" -maxdepth 1 -type f \( -name '*.sql.gz' -o -name '*.sql.gz.sha256' \) -mtime +"$RETENCION_DIAS" -delete
+# Los volcados sin comprimir no deben quedar en disco
+find "${PREPARACION:?}" -mindepth 1 -delete
+exit "$codigo"
