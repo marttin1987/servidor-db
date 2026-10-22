@@ -22,7 +22,7 @@ DUMP_BIN="${DUMP_BIN:-mariadb-dump}"
 
 if [ "$(id -u)" -ne 0 ]; then
 	echo "ERROR: ejecutar con sudo." >&2
-	exit 2
+    exit 2
 fi
 
 mkdir -p "$DESTINO"
@@ -61,10 +61,9 @@ for base in $BASES; do
 	fi
 done
 
-
 if [ "$ERRORES" -gt 0 ]; then
     echo "ERROR: $ERRORES base(s) fallaron; no se rota para conservar las copias anteriores." >&2
-	exit 2
+    exit 2
 fi
 
 find "$DESTINO" -maxdepth 1 -type f \( -name '*.sql.gz' -o -name '*.sql.gz.sha256' \) -mtime +"$RETENCION_DIAS" -delete
