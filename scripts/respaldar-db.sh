@@ -35,6 +35,13 @@ fi
 . "$CONFIG"
 PREPARACION="${DIR_ORIGEN:?falta DIR_ORIGEN en la configuracion}"
 
+exec 9>/run/lock/respaldar-db.lock
+if ! flock -n 9; then
+    echo "ERROR: ya hay un respaldo en curso." >&2
+    exit 2
+fi
+trap 'find "${PREPARACION:?}" -mindepth 1 -delete' EXIT
+
 mkdir -p "$PREPARACION"
 chmod 700 "$PREPARACION"
 find "${PREPARACION:?}" -mindepth 1 -delete
