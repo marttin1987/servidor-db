@@ -58,6 +58,16 @@ for base in $BASES; do
     fi
 done
 
+# Usuarios y permisos (incluye los hashes de las contrasenas)
+usuarios="$PREPARACION/usuarios.sql"
+if "$DUMP_BIN" --system=users > "$usuarios" \
+    && tail -n 1 "$usuarios" | grep -q '^-- Dump completed'; then
+    echo "OK: volcado de usuarios y permisos."
+else
+    echo "ERROR: fallo el volcado de usuarios y permisos." >&2
+    exit 2
+fi
+
 "$MOTOR" "$CONFIG"
 codigo=$?
 
