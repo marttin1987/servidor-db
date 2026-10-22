@@ -1,0 +1,8 @@
+[Unit]
+Description=Respaldo de las bases de MariaDB
+After=mariadb.service
+Wants=mariadb.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/respaldar-db.sh

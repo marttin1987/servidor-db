@@ -1,0 +1,5 @@
+DIR_ORIGEN="/var/backups/mariadb/origen"
+DIR_DESTINO="/var/backups/mariadb/copias"
+LOG_FILE="/var/log/respaldo-mariadb.log"
+DIAS_RETENCION=7
+UMBRAL_DISCO_MAX=90
