@@ -21,7 +21,7 @@ La reconstrucción debe ser reproducible y verificable.
 - Sistema operativo: Debian 13.
 - Base de datos: MariaDB.
 - Coordinador: scripts/respaldar-db.sh.
-- Motor de rotación: /usr/local/sbin/respaldo-rotatorio.sh.
+- Motor de rotación: /usr/local/sbin/respaldo-rotatorio-db.sh.
 - Configuración de ejemplo: config/db.conf.ejemplo.
 - Servicio systemd: systemd/respaldar-db.service.
 - Temporizador systemd: systemd/respaldar-db.timer.

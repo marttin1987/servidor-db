@@ -12,7 +12,7 @@ El proceso se divide en dos componentes:
 
 1. `scripts/respaldar-db.sh`: genera los volcados SQL en una carpeta temporal
    de preparación y comprueba que cada volcado haya finalizado correctamente.
-2. `/usr/local/sbin/respaldo-rotatorio.sh`: recibe la configuración y se
+2. `/usr/local/sbin/respaldo-rotatorio-db.sh`: recibe la configuración y se
    encarga de comprimir los archivos, generar la firma SHA-256 y aplicar
    la política de rotación.
 

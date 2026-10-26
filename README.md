@@ -17,7 +17,7 @@ flowchart TD
     SERVICE --> SCRIPT["respaldar-db.sh"]
     SCRIPT --> DUMP["Volcados SQL<br/>bases + usuarios/permisos"]
     DUMP --> PREP["DIR_ORIGEN<br/>carpeta de preparación"]
-    PREP --> MOTOR["respaldo-rotatorio.sh"]
+    PREP --> MOTOR["respaldo-rotatorio-db.sh"]
     MOTOR --> ARCHIVE["DIR_DESTINO<br/>archivo .tar.gz"]
     MOTOR --> HASH["Firma SHA-256"]
     SCRIPT --> CLEAN["Limpieza de archivos temporales"]
@@ -26,7 +26,7 @@ flowchart TD
 El proyecto separa responsabilidades:
 
 1. `scripts/respaldar-db.sh` genera y comprueba los volcados SQL.
-2. `/usr/local/sbin/respaldo-rotatorio.sh` comprime los volcados, genera la firma SHA-256 y aplica la rotación.
+2. `/usr/local/sbin/respaldo-rotatorio-db.sh` comprime los volcados, genera la firma SHA-256 y aplica la rotación.
 3. `systemd/respaldar-db.service` y `systemd/respaldar-db.timer` permiten ejecutar el proceso de forma programada.
 
 El script principal utiliza `flock` para impedir ejecuciones simultáneas y limpia la carpeta de preparación al finalizar.
@@ -47,7 +47,7 @@ El script principal utiliza `flock` para impedir ejecuciones simultáneas y limp
 - Debian con MariaDB y `mariadb-dump`.
 - Bash y utilidades del sistema utilizadas por los scripts, incluyendo `flock`, `sha256sum` y `tar`.
 - Acceso administrativo mediante `sudo`.
-- Motor rotatorio instalado en `/usr/local/sbin/respaldo-rotatorio.sh`.
+- Motor rotatorio instalado en `/usr/local/sbin/respaldo-rotatorio-db.sh`.
 - Configuración disponible en `/etc/respaldos/db.conf`.
 
 El proyecto se ha trabajado en Debian 13 sobre una VM de VirtualBox.
@@ -73,6 +73,25 @@ UMBRAL_DISCO_MAX=90
 | `UMBRAL_DISCO_MAX` | Umbral de ocupación de disco configurado |
 
 El archivo de configuración real debe estar protegido y ser propiedad de `root`. No se deben subir credenciales ni datos de producción al repositorio.
+
+
+## Instalación en Debian
+
+Desde la raíz del repositorio, instalar ambos scripts:
+
+```bash
+sudo install -o root -g root -m 750 scripts/respaldo-rotatorio-db.sh /usr/local/sbin/respaldo-rotatorio-db.sh
+sudo install -o root -g root -m 750 scripts/respaldar-db.sh /usr/local/sbin/respaldar-db.sh
+```
+
+Crear la configuración solo si todavía no existe:
+
+```bash
+sudo install -d -o root -g root -m 750 /etc/respaldos
+sudo test -f /etc/respaldos/db.conf || sudo install -o root -g root -m 600 config/db.conf.ejemplo /etc/respaldos/db.conf
+```
+
+Si la configuración ya existe en Debian, conservarla y no sobrescribirla con la plantilla.
 
 ## Ejecución manual
 

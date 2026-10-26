@@ -16,7 +16,7 @@ export LC_ALL=C
 umask 077
 
 BASES="${BASES:-inventario}"
-MOTOR="${MOTOR:-/usr/local/sbin/respaldo-rotatorio.sh}"
+MOTOR="${MOTOR:-/usr/local/sbin/respaldo-rotatorio-db.sh}"
 CONFIG="${CONFIG:-/etc/respaldos/db.conf}"
 DUMP_BIN="${DUMP_BIN:-mariadb-dump}"
 
