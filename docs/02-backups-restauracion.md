@@ -1,108 +1,181 @@
-# 02 - Backups de MariaDB y restauración
+# Backups y restauración de MariaDB
 
 ## Objetivo
 
-Tener copias automáticas de la base de datos y comprobar que se pueden restaurar. Incluye el *runbook*: la guía paso a paso para recuperar la base en caso de desastre.
+Respaldar bases de datos MariaDB y usuarios/permisos, integrar los volcados
+con el motor de respaldo rotatorio y documentar una restauración de prueba
+sin modificar la base de datos original.
 
 ## Diseño
 
-El script `scripts/respaldar-db.sh` hace una copia de cada base indicada en `BASES` (por defecto `inventario`):
+El proceso se divide en dos componentes:
 
-- Genera un volcado con `mariadb-dump --single-transaction --routines --triggers --events`. La opción `--single-transaction` toma una copia consistente sin bloquear la base.
-- Lo comprime y lo escribe en un archivo temporal. Solo si el volcado y la compresión terminaron bien lo renombra a su nombre final, así nunca queda una copia a medias.
-- Crea una firma SHA-256 junto al archivo.
-- Borra las copias de más de 7 días.
-- Entra a la base como `root` por el socket del sistema: no guarda ninguna contraseña.
-- Deja los archivos con permisos `600` en una carpeta `700` (`/var/backups/db`).
+1. `scripts/respaldar-db.sh`: genera los volcados SQL en una carpeta temporal
+   de preparación y comprueba que cada volcado haya finalizado correctamente.
+2. `/usr/local/sbin/respaldo-rotatorio.sh`: recibe la configuración y se
+   encarga de comprimir los archivos, generar la firma SHA-256 y aplicar
+   la política de rotación.
 
-Códigos de salida: `0` correcto, `2` error (falta de `sudo` o fallo de algún volcado).
+El script principal:
 
-## Instalación
+- Usa `mariadb-dump --single-transaction --routines --triggers --events`
+  para cada base indicada en `BASES` (por defecto, `inventario`).
+- Genera también un volcado de usuarios y permisos mediante
+  `mariadb-dump --system=users`.
+- Comprueba la marca final de los volcados.
+- Usa `flock` para impedir ejecuciones simultáneas.
+- Aplica permisos restrictivos mediante `umask 077` y permisos `700`
+  en la carpeta de preparación.
+- Limpia los volcados SQL sin comprimir al terminar, incluso ante errores,
+  mediante un `trap`.
+- Delega la compresión, la firma y la retención al motor rotatorio.
 
-El script se instala en una ruta que solo puede modificar root, porque `cron` lo ejecuta con privilegios:
+Los respaldos finales son archivos `.tar.gz` acompañados por archivos
+`.sha256`, según el comportamiento del motor rotatorio.
 
-```bash
-sudo install -m 750 -o root -g root ~/respaldar-db.sh /usr/local/sbin/respaldar-db.sh
-```
+## Configuración
 
-## Pruebas del script
+El archivo de configuración utilizado en producción es:
 
-Antes de usar la base real se probó con un `mariadb-dump` simulado, incluido un caso de falla:
+`/etc/respaldos/db.conf`
 
-| Caso | Resultado |
-| --- | --- |
-| Volcado correcto | Archivo y firma creados, la firma verifica, `rc=0` |
-| Volcado que falla | No queda ningún archivo, `rc=2` |
-| Copia de 10 días de antigüedad | La rotación la borra |
-| Permisos | Carpeta `700`, archivos `600` |
-
-Con la base real: `sudo /usr/local/sbin/respaldar-db.sh` devolvió `rc=0` y creó el `.sql.gz` y su `.sha256`.
-
-## Prueba de restauración
-
-Se restauró la copia en una base **nueva**, sin tocar la original, y se compararon las tablas:
+El repositorio incluye una plantilla en `config/db.conf.ejemplo`:
 
 ```bash
-sudo bash -c 'cd /var/backups/db && sha256sum -c *.sha256'
-sudo mariadb -e "CREATE DATABASE inventario_restaurada CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-sudo bash -c 'zcat "$(ls -t /var/backups/db/*.sql.gz | head -1)" | mariadb inventario_restaurada'
-sudo mariadb -e "CHECKSUM TABLE inventario.productos, inventario_restaurada.productos;"
+DIR_ORIGEN="/var/backups/mariadb/origen"
+DIR_DESTINO="/var/backups/mariadb/copias"
+LOG_FILE="/var/log/respaldo-mariadb.log"
+DIAS_RETENCION=7
+UMBRAL_DISCO_MAX=90
 ```
 
-La firma dio `OK` y las dos tablas devolvieron el mismo `Checksum` (`2544526812`): son idénticas.
+La configuración contiene:
 
-## Simulación de desastre
+- `DIR_ORIGEN`: carpeta temporal con los volcados SQL.
+- `DIR_DESTINO`: destino de las copias rotatorias.
+- `LOG_FILE`: archivo de registro del motor.
+- `DIAS_RETENCION`: antigüedad de retención configurada.
+- `UMBRAL_DISCO_MAX`: umbral de ocupación de disco configurado.
 
-Se borró la base con `DROP DATABASE inventario;`, se la recreó vacía y se restauró desde la copia. La tabla `productos` volvió con sus tres filas, y el usuario `app_inventario` pudo leerlas de nuevo.
+El archivo real debe ser propiedad de `root` y tener permisos restrictivos.
+No guardar credenciales ni secretos en el repositorio.
 
-## Runbook: recuperar la base `inventario`
+## Ejecución manual
 
-Reemplazar `FECHA` por la de la copia que se quiere usar (`sudo ls /var/backups/db`).
+El script requiere privilegios de administrador y que existan tanto
+el motor rotatorio como la configuración:
 
 ```bash
-# 1. Verificar que la copia no esté dañada
-sudo bash -c 'cd /var/backups/db && sha256sum -c inventario_FECHA.sql.gz.sha256'
-
-# 2. Crear la base vacía (si existe y está dañada, borrarla antes con DROP DATABASE)
-sudo mariadb -e "CREATE DATABASE inventario CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-
-# 3. Restaurar los datos
-sudo bash -c 'zcat /var/backups/db/inventario_FECHA.sql.gz | mariadb inventario'
-
-# 4. Comprobar
-sudo mariadb inventario -e "SELECT COUNT(*) FROM productos;"
+sudo /usr/local/sbin/respaldar-db.sh
 ```
 
-Si se perdió todo el servidor y no solo la base, hay que volver a crear antes a `app_inventario` y sus permisos (doc 01), porque la copia **no incluye usuarios**.
+Se pueden cambiar las bases mediante la variable `BASES`:
 
-## Automatización
-
-El archivo `/etc/cron.d/db-backup` ejecuta el backup todos los días a las 03:00, después de la exportación de configuraciones del servidor:
-
-```cron
-0 3 * * * root /usr/local/sbin/respaldar-db.sh >> /var/log/db-backup.log 2>&1
+```bash
+sudo env BASES="inventario otra_base" \
+  /usr/local/sbin/respaldar-db.sh
 ```
 
-Antes de dejar el horario definitivo se programó una prueba para dos minutos más tarde. El log mostró la línea `OK: ...` y apareció un segundo par de archivos. La prueba se borró y se creó el archivo definitivo con permisos `644`.
+El código de salida `0` indica éxito; `2` indica un error del proceso
+principal. También puede propagarse el código de salida del motor rotatorio.
 
-Error cometido: el primer intento de crear el archivo de `cron` se ejecutó en el anfitrión y no en la VM. Se detectó al revisar el prompt y se quitó. En la VM, además, quedaba activa la prueba de cada día, que hubo que borrar.
+## Verificación de los respaldos
 
-## Limitaciones
+Después de una ejecución correcta, comprobar que existan el archivo
+comprimido y su firma en el destino configurado:
 
-- Las copias están en el mismo disco que el servidor: no protegen de perder el disco.
-- La copia no incluye usuarios ni permisos, ni el archivo `/root/app_inventario.pass`.
-- `cron` solo corre con la VM encendida a las 03:00.
-- Se respalda una sola base; para más se usa la variable `BASES`.
+```bash
+sudo ls -lh /var/backups/mariadb/copias
+```
 
-## Próximos pasos
+Verificar la firma SHA-256 usando el archivo de firma correspondiente.
+Ejecutar el comando desde el directorio donde estén ambos archivos:
 
-- Guardar también los usuarios y permisos.
-- Copiar las copias fuera del servidor y verificarlas allá, como en el proyecto `servidor-seguro`.
-- Agregar el estado de este backup al reporte con semáforo.
+```bash
+sudo sha256sum -c ARCHIVO.tar.gz.sha256
+```
 
-## Aprendizajes
+Sustituir el nombre de ejemplo por el nombre real generado por el motor.
+El resultado esperado es `OK`.
 
-- Una copia solo vale cuando se probó restaurarla: el desastre simulado es la prueba real.
-- Escribir en un archivo temporal y renombrar evita copias a medias.
-- Entrar por el socket como `root` evita guardar contraseñas en el script.
-- Cada comando de `cron` se prueba en pequeño antes de dejar el horario definitivo, y hay que leer el prompt para saber en qué máquina se está.
+Inspeccionar el contenido del archivo sin extraerlo:
+
+```bash
+sudo tar -tzf ARCHIVO.tar.gz
+```
+
+El archivo debe contener los volcados SQL esperados, incluida la copia
+de usuarios y permisos. Confirmar los nombres exactos con la salida
+del comando, ya que dependen de la estructura del motor rotatorio.
+
+## Restauración de prueba no destructiva
+
+Realizar la prueba en un entorno de laboratorio y utilizar un nombre
+de base de datos exclusivo para la restauración. No ejecutar `DROP DATABASE`
+ni sobrescribir la base original como parte de una prueba rutinaria.
+
+1. Seleccionar una copia y verificar su SHA-256.
+2. Inspeccionar el contenido con `tar -tzf`.
+3. Extraer el volcado de la base a un directorio temporal protegido.
+4. Crear una base de prueba vacía, por ejemplo `inventario_restore_test`.
+5. Restaurar únicamente el volcado de esa base en la base de prueba.
+6. Comparar tablas, estructura y cantidad de registros con los datos
+   esperados.
+7. Registrar los comandos, resultados y fecha en la evidencia del proyecto.
+8. Eliminar la base de prueba y los archivos temporales una vez verificado
+   el resultado.
+
+Ejemplo de extracción a un directorio temporal:
+
+```bash
+umask 077
+mkdir -p /tmp/restauracion-db
+sudo tar -xzf ARCHIVO.tar.gz -C /tmp/restauracion-db
+sudo find /tmp/restauracion-db -maxdepth 3 -type f -print
+```
+
+Antes de restaurar, identificar la ruta exacta del volcado de la base.
+No importar `usuarios.sql` en una instancia compartida durante una prueba:
+ese archivo puede contener información sensible y modificar cuentas
+y permisos. Probar la recuperación de usuarios en una instancia aislada.
+
+## systemd
+
+El proyecto incluye:
+
+- `systemd/respaldar-db.service`
+- `systemd/respaldar-db.timer`
+
+Consultar el estado y las últimas ejecuciones:
+
+```bash
+systemctl status respaldar-db.timer
+systemctl list-timers respaldar-db.timer
+sudo journalctl -u respaldar-db.service -n 50 --no-pager
+```
+
+La prueba operativa debe confirmar que el servicio finaliza correctamente,
+que los respaldos se generan y que la verificación de SHA-256 es satisfactoria.
+
+## Seguridad y limitaciones
+
+- Los volcados SQL y el respaldo de usuarios pueden contener información
+  confidencial.
+- Mantener permisos restrictivos sobre configuración, preparación y copias.
+- Una firma SHA-256 permite detectar cambios en los archivos, pero por sí sola
+  no demuestra que la restauración funcione.
+- Una copia local no sustituye una copia externa ni una política de recuperación
+  ante pérdida del servidor.
+- La restauración debe probarse periódicamente en un entorno aislado.
+
+## Evidencias de validación
+
+Registrar en el repositorio los resultados comprobados de:
+
+- Volcado de bases y usuarios/permisos.
+- Integración con el motor rotatorio.
+- Verificación SHA-256.
+- Prueba de fallo y limpieza de temporales.
+- Prevención de ejecuciones simultáneas.
+- Ejecución programada con systemd.
+- Restauración de prueba sin alterar la base original.

@@ -2,78 +2,144 @@
 
 [![ShellCheck](https://github.com/marttin1987/servidor-db/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/marttin1987/servidor-db/actions/workflows/shellcheck.yml)
 
-Servidor MariaDB en Debian con un usuario de mínimo privilegio, backups automáticos y restauración probada.
+Proyecto de administración de MariaDB en Debian: usuarios de mínimo privilegio, volcados de bases y usuarios, integración con un motor de backup rotatorio, verificación de integridad y restauración de prueba.
 
 ## Problema que resuelve
 
-Una base de datos guarda lo más valioso de una aplicación y, si falla, no hay vuelta atrás sin una copia. Este proyecto muestra cómo instalarla de forma segura, darle a la aplicación solo los permisos que necesita y tener backups que se comprobaron restaurando, no solo creando.
+Una base de datos necesita controles de acceso y una estrategia de recuperación verificable. Este proyecto documenta cómo limitar los permisos de la aplicación y automatizar respaldos, incluyendo una guía para probar la restauración sin modificar la base original.
 
 ## Arquitectura
 
 ```mermaid
-flowchart LR
-    APP["Aplicación<br/>usuario app_inventario"] -->|"127.0.0.1:3306"| DB[("MariaDB<br/>base inventario")]
-    CRON["cron 03:00"] --> S["respaldar-db.sh"]
-    S -->|"mariadb-dump por socket"| DB
-    S --> B["/var/backups/db<br/>.sql.gz y SHA-256"]
+flowchart TD
+    APP["Aplicación"] --> DB[("MariaDB<br/>base inventario")]
+    TIMER["systemd timer"] --> SERVICE["respaldar-db.service"]
+    SERVICE --> SCRIPT["respaldar-db.sh"]
+    SCRIPT --> DUMP["Volcados SQL<br/>bases + usuarios/permisos"]
+    DUMP --> PREP["DIR_ORIGEN<br/>carpeta de preparación"]
+    PREP --> MOTOR["respaldo-rotatorio.sh"]
+    MOTOR --> ARCHIVE["DIR_DESTINO<br/>archivo .tar.gz"]
+    MOTOR --> HASH["Firma SHA-256"]
+    SCRIPT --> CLEAN["Limpieza de archivos temporales"]
 ```
+
+El proyecto separa responsabilidades:
+
+1. `scripts/respaldar-db.sh` genera y comprueba los volcados SQL.
+2. `/usr/local/sbin/respaldo-rotatorio.sh` comprime los volcados, genera la firma SHA-256 y aplica la rotación.
+3. `systemd/respaldar-db.service` y `systemd/respaldar-db.timer` permiten ejecutar el proceso de forma programada.
+
+El script principal utiliza `flock` para impedir ejecuciones simultáneas y limpia la carpeta de preparación al finalizar.
 
 ## Qué incluye
 
-| Área | Medidas | Documento |
+| Área | Implementación | Documentación |
 | --- | --- | --- |
-| Instalación | MariaDB solo en `127.0.0.1`, revisión de la configuración de fábrica | [01](docs/01-mariadb-instalacion-usuarios.md) |
-| Usuarios | `root` solo por socket; `app_inventario` con permisos mínimos y contraseña generada, guardada con permisos `600` | [01](docs/01-mariadb-instalacion-usuarios.md) |
-| Backups | Volcado consistente, escritura atómica, firma SHA-256, rotación a 7 días, `cron` diario | [02](docs/02-backups-restauracion.md) |
-| Restauración | Prueba con comparación de tablas, desastre simulado y runbook | [02](docs/02-backups-restauracion.md) |
+| Instalación y usuarios | MariaDB, usuario de aplicación y permisos mínimos | [01 - Instalación y usuarios](docs/01-mariadb-instalacion-usuarios.md) |
+| Backup de bases | `mariadb-dump` con transacción consistente, rutinas, triggers y eventos | [02 - Backups y restauración](docs/02-backups-restauracion.md) |
+| Usuarios y permisos | Volcado adicional mediante `mariadb-dump --system=users` | [02 - Backups y restauración](docs/02-backups-restauracion.md) |
+| Integridad y retención | Archivo `.tar.gz`, firma SHA-256 y política del motor rotatorio | [02 - Backups y restauración](docs/02-backups-restauracion.md) |
+| Automatización | Unidad y timer de systemd | [02 - Backups y restauración](docs/02-backups-restauracion.md) |
+| Calidad | ShellCheck mediante GitHub Actions | [Workflow](.github/workflows/shellcheck.yml) |
 
 ## Requisitos
 
-- Debian con MariaDB (`sudo apt install mariadb-server`).
-- Acceso `sudo`.
+- Debian con MariaDB y `mariadb-dump`.
+- Bash y utilidades del sistema utilizadas por los scripts, incluyendo `flock`, `sha256sum` y `tar`.
+- Acceso administrativo mediante `sudo`.
+- Motor rotatorio instalado en `/usr/local/sbin/respaldo-rotatorio.sh`.
+- Configuración disponible en `/etc/respaldos/db.conf`.
 
-Probado en Debian 13 sobre una VM de VirtualBox.
-
-## Uso
-
-Instalar el script en una ruta de root y ejecutarlo:
-
-```bash
-sudo install -m 750 -o root -g root scripts/respaldar-db.sh /usr/local/sbin/respaldar-db.sh
-sudo /usr/local/sbin/respaldar-db.sh
-```
-
-Para programarlo todos los días a las 03:00:
-
-```bash
-echo '0 3 * * * root /usr/local/sbin/respaldar-db.sh >> /var/log/db-backup.log 2>&1' | sudo tee /etc/cron.d/db-backup
-sudo chmod 644 /etc/cron.d/db-backup
-```
-
-Los pasos para recuperar una base están en el runbook del [doc 02](docs/02-backups-restauracion.md).
+El proyecto se ha trabajado en Debian 13 sobre una VM de VirtualBox.
 
 ## Configuración
 
-Variables opcionales del script:
+El archivo de configuración de ejecución es `/etc/respaldos/db.conf`. El repositorio incluye una plantilla en `config/db.conf.ejemplo`:
 
-| Variable | Qué define | Valor por defecto |
-| --- | --- | --- |
-| `BASES` | Bases a respaldar, separadas por espacios | `inventario` |
-| `DESTINO` | Carpeta de las copias | `/var/backups/db` |
-| `RETENCION_DIAS` | Días que se conserva cada copia | `7` |
+```bash
+DIR_ORIGEN="/var/backups/mariadb/origen"
+DIR_DESTINO="/var/backups/mariadb/copias"
+LOG_FILE="/var/log/respaldo-mariadb.log"
+DIAS_RETENCION=7
+UMBRAL_DISCO_MAX=90
+```
 
-## Pruebas
+| Variable | Función |
+| --- | --- |
+| `DIR_ORIGEN` | Carpeta temporal de preparación de los volcados |
+| `DIR_DESTINO` | Destino de los respaldos rotatorios |
+| `LOG_FILE` | Registro del motor de backup |
+| `DIAS_RETENCION` | Política de retención configurada |
+| `UMBRAL_DISCO_MAX` | Umbral de ocupación de disco configurado |
 
-- ShellCheck sin avisos en cada `push`, con GitHub Actions.
-- El script se probó con un volcado simulado: caso correcto, caso con falla y rotación.
-- Restauración en una base nueva con `CHECKSUM TABLE` idéntico, y desastre simulado con `DROP DATABASE`.
+El archivo de configuración real debe estar protegido y ser propiedad de `root`. No se deben subir credenciales ni datos de producción al repositorio.
 
-## Decisiones y límites
+## Ejecución manual
 
-- El script entra como `root` por el socket del sistema: no guarda ninguna contraseña.
-- Los backups no incluyen usuarios ni permisos; hay que recrearlos si se pierde el servidor.
-- Las copias están en el mismo disco que el servidor: falta copiarlas fuera.
-- MariaDB escucha solo en local, por lo que la aplicación tiene que estar en la misma máquina.
+El script principal espera ejecutarse con privilegios administrativos y requiere la configuración y el motor rotatorio:
+
+```bash
+sudo /usr/local/sbin/respaldar-db.sh
+```
+
+Por defecto respalda la base `inventario` y también genera un volcado de usuarios y permisos. Para indicar otras bases:
+
+```bash
+sudo env BASES="inventario otra_base" \
+  /usr/local/sbin/respaldar-db.sh
+```
+
+La variable `MOTOR` permite indicar otra ruta para el motor rotatorio y `CONFIG` permite indicar otro archivo de configuración.
+
+## Verificar un respaldo
+
+Listar las copias del destino configurado:
+
+```bash
+sudo ls -lh /var/backups/mariadb/copias
+```
+
+Verificar la firma desde el directorio que contiene el archivo y su archivo de firma:
+
+```bash
+sudo sha256sum -c ARCHIVO.tar.gz.sha256
+```
+
+Inspeccionar el contenido sin extraerlo:
+
+```bash
+sudo tar -tzf ARCHIVO.tar.gz
+```
+
+Reemplazar los nombres de ejemplo por los archivos reales. La firma comprueba la integridad del archivo, pero no reemplaza una prueba de restauración.
+
+## Restauración
+
+La restauración debe probarse en una base de datos separada o en una instancia aislada. No eliminar ni sobrescribir la base original como parte de una prueba rutinaria.
+
+1. Verificar la firma SHA-256.
+2. Inspeccionar el contenido del archivo `.tar.gz`.
+3. Extraer el volcado de la base a un directorio temporal protegido.
+4. Crear una base de prueba vacía y restaurar allí el volcado correspondiente.
+5. Verificar estructura y datos.
+6. Probar la restauración de usuarios y permisos únicamente en una instancia aislada, ya que puede modificar cuentas y permisos.
+7. Registrar los resultados y limpiar los recursos temporales.
+
+Los comandos detallados y las precauciones están en [02 - Backups y restauración](docs/02-backups-restauracion.md).
+
+## Pruebas y validación
+
+El repositorio incluye un workflow de GitHub Actions para ejecutar ShellCheck. Las pruebas operativas del proyecto contemplan el resultado del volcado, el manejo de errores, la limpieza de temporales, la prevención de ejecuciones simultáneas, la integración con el motor rotatorio y la ejecución programada.
+
+Las pruebas deben considerarse verificadas solo cuando exista evidencia reproducible de su ejecución. La documentación del procedimiento no implica que todas las pruebas se hayan vuelto a ejecutar en el estado actual del repositorio.
+
+## Seguridad y límites
+
+- Los volcados de usuarios pueden contener hashes de contraseñas y otros datos sensibles.
+- Mantener protegidos los archivos de configuración, volcados y respaldos.
+- Los respaldos guardados en el mismo disco no protegen frente a la pérdida física de ese disco.
+- Una estrategia de producción debe incluir una copia externa y pruebas periódicas de recuperación.
+- La restauración debe probarse en un entorno aislado antes de utilizarse en producción.
 
 ## Documentación
 
@@ -82,4 +148,4 @@ Variables opcionales del script:
 
 ## Licencia
 
-Licencia MIT. Ver el archivo [LICENSE](LICENSE).
+Licencia MIT. Ver [LICENSE](LICENSE).
