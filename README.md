@@ -149,3 +149,26 @@ Las pruebas deben considerarse verificadas solo cuando exista evidencia reproduc
 ## Licencia
 
 Licencia MIT. Ver [LICENSE](LICENSE).
+
+## Rotación del log de backups
+
+La configuración de Logrotate se versiona en
+`config/logrotate-respaldo-mariadb` y rota diariamente el log
+`/var/log/respaldo-mariadb.log`, conserva 14 rotaciones y comprime
+los archivos antiguos.
+
+Para instalarla en Debian:
+
+```bash
+sudo install -o root -g root -m 0644 \
+  config/logrotate-respaldo-mariadb \
+  /etc/logrotate.d/respaldo-mariadb
+```
+
+Validar la configuración sin ejecutar una rotación real:
+
+```bash
+sudo logrotate --debug /etc/logrotate.d/respaldo-mariadb
+```
+
+El temporizador del sistema `logrotate.timer` debe estar habilitado.
