@@ -1,27 +1,32 @@
 # Sincronización horaria
 
-## Estado inicial
+## Estado final
 
 - Sistema operativo: Debian 13.
 - Zona horaria: America/Argentina/Buenos_Aires.
-- Servicio NTP: systemd-timesyncd.
+- Servicio: Chrony.
 - Estado del servicio: activo y habilitado.
-- Estado de sincronización: sincronizado.
-- Fuente observada: 170.210.222.2:123.
-- Fuente configurada: 2.debian.pool.ntp.org.
+- Sincronización del sistema: confirmada por timedatectl.
+- Fuente seleccionada observada: evlbi.aggo-conicet.gob.ar.
+- Estrato observado: 3.
 
-## Verificaciones
+## Verificaciones realizadas
 
-Comandos ejecutados en la VM:
+```bash
+systemctl is-active chrony
+systemctl is-enabled chrony
+timedatectl status
+chronyc tracking
+chronyc sources -v
+```
 
-- `timedatectl status`
-- `timedatectl timesync-status`
-- `systemctl status systemd-timesyncd --no-pager`
+## Resultado
 
-## Decisión técnica
+Chrony está activo y habilitado para iniciar con el sistema.
+timedatectl confirma que el reloj está sincronizado.
+chronyc sources -v identifica la fuente seleccionada mediante
+el indicador ^*.
 
-La sincronización horaria funciona con systemd-timesyncd.
-Chrony queda como mejora futura para practicar su instalación,
-configuración y verificación mediante una transición controlada.
-
-No se afirma que Chrony esté instalado ni configurado.
+La dispersión y las estimaciones de frecuencia observadas
+durante la primera verificación deben revisarse nuevamente
+si se necesita evaluar la estabilidad a lo largo del tiempo.
