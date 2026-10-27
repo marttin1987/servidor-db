@@ -85,3 +85,19 @@ Resultado:
 La prueba reprodujo la regla de selección y eliminación del motor, sin ejecutar la retención sobre los respaldos reales.
 
 **Resultado:** prueba de retención aprobada en entorno aislado.
+
+
+## 7. Validación de usuarios y permisos
+
+Se inspeccionó el archivo `origen/usuarios.sql` incluido en el respaldo MariaDB del 27/10/2026.
+
+Comprobaciones realizadas:
+
+- El archivo contiene instrucciones para crear usuarios y asignar permisos.
+- Se identificó el usuario `app_inventario`@`localhost`.
+- Se verificaron los permisos actuales de esa cuenta mediante `SHOW GRANTS`.
+- Los permisos observados coinciden con los incluidos en el respaldo: `SELECT`, `INSERT`, `UPDATE` y `DELETE` sobre `inventario`.*.
+
+**Resultado:** contenido del respaldo y permisos actuales inspeccionados correctamente.
+
+**Pendiente:** restaurar usuarios y permisos en una instancia aislada de MariaDB y verificar el resultado. El archivo no se importó en el servidor principal porque contiene instrucciones que pueden modificar cuentas administrativas.
