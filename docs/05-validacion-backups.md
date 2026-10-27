@@ -68,3 +68,20 @@ La configuración de logrotate establece:
 - Comportamiento de la retención ante respaldos que superen los siete días.
 
 Esta validación corresponde al laboratorio y no sustituye una prueba de recuperación ante un desastre real.
+
+## 6. Prueba de retención
+
+Se realizó una prueba aislada en un directorio temporal de Debian, con archivos ficticios de respaldo.
+
+- Archivo antiguo: antigüedad de 8 días.
+- Archivo reciente: antigüedad de 1 hora.
+- Umbral configurado: 7 días (10.080 minutos).
+
+Resultado:
+- Se seleccionó únicamente el respaldo antiguo.
+- Se eliminó el archivo antiguo junto con su firma `.sha256`.
+- Se conservaron el respaldo reciente y su firma.
+
+La prueba reprodujo la regla de selección y eliminación del motor, sin ejecutar la retención sobre los respaldos reales.
+
+**Resultado:** prueba de retención aprobada en entorno aislado.
