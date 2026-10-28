@@ -165,6 +165,21 @@ Las pruebas deben considerarse verificadas solo cuando exista evidencia reproduc
 - [01 - MariaDB: instalación, revisión y usuarios](docs/01-mariadb-instalacion-usuarios.md)
 - [02 - Backups de MariaDB y restauración](docs/02-backups-restauracion.md)
 
+## Estado del proyecto
+
+La implementación funcional y las verificaciones realizadas en el laboratorio están documentadas en [05 - Validación de backups](docs/05-validacion-backups.md).
+
+**Estado actual:** backup automatizado implementado; checksum y contenido del archivo comprobados; comparación de datos entre la base original y una base de restauración de prueba documentada; temporizador de systemd habilitado y con ejecución exitosa registrada.
+
+**Pendiente conocido:** ejecutar el runbook [04 - Reconstrucción limpia](docs/04-reconstruccion-limpia.md) completo en una VM Debian 13 limpia y aislada. Esta prueba no se declara completada porque el laboratorio disponible tiene memoria limitada y no se creó una segunda VM. No se debe reinstalar la VM actual ni modificar los respaldos existentes para marcar este punto como aprobado.
+
+## Documentación
+
+- [01 - MariaDB: instalación, revisión y usuarios](docs/01-mariadb-instalacion-usuarios.md)
+- [02 - Backups de MariaDB y restauración](docs/02-backups-restauracion.md)
+- [04 - Runbook de reconstrucción limpia](docs/04-reconstruccion-limpia.md)
+- [05 - Evidencias de validación](docs/05-validacion-backups.md)
+
 ## Licencia
 
 Licencia MIT. Ver [LICENSE](LICENSE).
